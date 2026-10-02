@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -30,9 +30,9 @@ func newTestRouter(t *testing.T, uploader *drainingUploader) (*router, string) {
 	t.Helper()
 
 	dest := t.TempDir()
-	cfg := config{dest: dest, maxUploadSize: 1 << 20, logf: t.Logf, s3Bucket: "bucket"}
+	cfg := Config{Dest: dest, MaxUploadSize: 1 << 20, Logf: t.Logf, S3Bucket: "bucket"}
 	if uploader != nil {
-		cfg.s3Uploader = uploader
+		cfg.S3Uploader = uploader
 	}
 	rt, err := newRouter(cfg)
 	if err != nil {

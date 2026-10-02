@@ -1,25 +1,19 @@
 // Command server exposes every example of the upload series under
-// /articles/<slug>/, one prefix per blog article. See routes.go for the list.
+// /articles/<slug>/, one prefix per blog article. See internal/server/routes.go for the list.
 package main
 
 import (
 	"context"
 	"flag"
-	"fmt"
 	"log"
-	"net/http"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	transfermanager "github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/clevertechware/upload-fichier-go/internal/upload"
+	"github.com/clevertechware/upload-fichier-go/internal/server"
 )
 
-const (
-	defaultMaxUploadSize = 32 << 20
-	readHeaderTimeout    = 10 * time.Second
-)
+const defaultMaxUploadSize = 32 << 20
 
 func main() {
 	if err := run(); err != nil {
@@ -35,43 +29,18 @@ func run() error {
 		"default chain, and AWS_ENDPOINT_URL_S3 points it at MinIO or LocalStack")
 	flag.Parse()
 
-	cfg := config{dest: *dest, maxUploadSize: *maxUploadSize, logf: log.Printf, s3Bucket: *s3Bucket}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := server.Config{
+		Addr: *addr, Dest: *dest, MaxUploadSize: *maxUploadSize, Logf: log.Printf, S3Bucket: *s3Bucket,
+	}
 	if *s3Bucket != "" {
-		uploader, err := newS3Uploader(context.Background())
+		uploader, err := server.NewS3Uploader(ctx)
 		if err != nil {
 			return err
 		}
-		cfg.s3Uploader = uploader
+		cfg.S3Uploader = uploader
 	}
-
-	routes, err := newRouter(cfg)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if closeErr := routes.close(); closeErr != nil {
-			log.Printf("close upload directories: %v", closeErr)
-		}
-	}()
-
-	srv := &http.Server{
-		Addr:    *addr,
-		Handler: routes.mux,
-		// ReadTimeout would also bound the time to read the body, which
-		// breaks large uploads; use http.ResponseController.SetReadDeadline
-		// per request instead if a per-request read deadline is needed.
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-
-	log.Printf("listening on %s, storing uploads under %s", *addr, *dest)
-	return srv.ListenAndServe()
-}
-
-// newS3Uploader builds the article 4 uploader with upload.ConfigureS3Uploader.
-func newS3Uploader(ctx context.Context) (*transfermanager.Client, error) {
-	awsConfig, err := awsconfig.LoadDefaultConfig(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("load AWS config: %w", err)
-	}
-	return transfermanager.New(s3.NewFromConfig(awsConfig), upload.ConfigureS3Uploader), nil
+	return server.Run(ctx, cfg)
 }

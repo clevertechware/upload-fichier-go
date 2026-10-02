@@ -27,19 +27,20 @@ go run ./cmd/server                              # example server on :8080
 
 - `internal/upload/` holds every HTTP receiving handler. The files are layered on purpose, one per article:
   - `handler.go`: article 1 handlers (`ReadAll`, `FormFile`, `MultipartReader`) with `MaxBytesReader` and 413.
-  - `pipeline.go`: `NewValidatingHandler` (article 2: sniff, whitelist, sha256, server-generated name, `os.Root`, via `filecheck`) and
-    `NewTrackedPipelineHandler` (article 3: the same pipeline plus `streamio.TrackedReader`). The tracked version
-    wraps the same reader, so validation is not duplicated.
+  - `pipeline.go`: `NewValidatingHandler` (article 2: sniff, whitelist, sha256, server-generated name, `os.Root`,
+    via `filecheck`) and `NewTrackedPipelineHandler` (article 3: the same pipeline plus `streamio.TrackedReader`).
+    The tracked version wraps the same reader, so validation is not duplicated.
   - `receive.go`: the reception both pipelines share (`readValidatedPart`: size limit, first file part, sniff,
     validate, generated name) and `writeError`, which maps a `statusError` or `http.MaxBytesError` to the response.
   - `s3.go`: `NewS3PipelineHandler` (article 4) streams to S3 through `transfermanager.UploadObject` and a concurrency
-    semaphore (503 + `Retry-After`). It reuses `readValidatedPart`, `writeError` and `filecheck.NewHashingReader`; `ConfigureS3Uploader` holds the
-    transfermanager settings shared by `cmd/server` and `cmd/memprofile`.
+    semaphore (503 + `Retry-After`). It reuses `readValidatedPart`, `writeError` and `filecheck.NewHashingReader`.
+    `ConfigureS3Uploader` holds the transfermanager settings shared by `internal/server` and `cmd/memprofile`.
 - `internal/filecheck/`: the HTTP-free building blocks (`SniffType`, `ValidateType`, `AllowedTypes`,
   `GenerateStoredName`, `CreateInRoot`, `HashingReader`). `upload` depends on it, never the reverse.
-- `cmd/server/`: one route per example under `/articles/<slug>/...`, slug = the article frontmatter slug, files stored
-  in `<dest>/<slug>/`. `routes.go` lists them; a new example is mounted there under its article's slug. The S3 route
-  answers 503 unless `-s3-bucket` is set.
+- `internal/server/`: `Run(ctx, Config)` serves until the context is cancelled, then shuts down gracefully.
+  `routes.go` mounts one route per example under `/articles/<slug>/...`, slug = the article frontmatter slug, files
+  stored in `<dest>/<slug>/`; a new example is mounted there under its article's slug. The S3 route answers 503 unless
+  `-s3-bucket` is set. `cmd/server/` only parses flags and wires SIGINT/SIGTERM.
 - `streamio/`: `TrackedReader` (progress throttled to 200 ms, a final callback guaranteed at EOF, context cancellation).
 - `client/` and `internal/chunkupload/`: 5 MiB chunked client and its demo reassembly server (test-only, never expose).
 - `internal/genfile/`: streams multipart test bodies without loading them in memory.

@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"errors"
@@ -27,22 +27,23 @@ const (
 	s3SlotWait       = 30 * time.Second
 )
 
-type config struct {
-	dest          string
-	maxUploadSize int64
-	logf          upload.Logf
-	s3Bucket      string
-	s3Uploader    upload.S3Uploader
+type Config struct {
+	Addr          string
+	Dest          string
+	MaxUploadSize int64
+	Logf          upload.Logf
+	S3Bucket      string
+	S3Uploader    upload.S3Uploader
 }
 
 // router mounts every example under /articles/<slug>/ and stores its files in <dest>/<slug>/.
 type router struct {
 	mux   *http.ServeMux
-	cfg   config
+	cfg   Config
 	roots []*os.Root
 }
 
-func newRouter(cfg config) (*router, error) {
+func newRouter(cfg Config) (*router, error) {
 	routes := &router{mux: http.NewServeMux(), cfg: cfg}
 	mounts := []func() error{routes.mountMemory, routes.mountValidation, routes.mountTracking}
 	for _, mount := range mounts {
@@ -67,7 +68,7 @@ func (rt *router) handle(method, slug, name string, handler http.Handler) {
 }
 
 func (rt *router) articleDir(slug string) (string, error) {
-	dir := filepath.Join(rt.cfg.dest, slug)
+	dir := filepath.Join(rt.cfg.Dest, slug)
 	if err := os.MkdirAll(dir, dirPermissions); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
@@ -95,7 +96,7 @@ func (rt *router) mountMemory() error {
 	rt.handle(http.MethodPost, slugMemory, "read-all", upload.NewReadAllHandler(dir))
 	rt.handle(http.MethodPost, slugMemory, "form-file", upload.NewFormFileHandler(dir, formFileMaxBytes))
 	rt.handle(http.MethodPost, slugMemory, "multipart-reader",
-		upload.NewMultipartReaderHandler(dir, rt.cfg.maxUploadSize))
+		upload.NewMultipartReaderHandler(dir, rt.cfg.MaxUploadSize))
 	return nil
 }
 
@@ -105,7 +106,7 @@ func (rt *router) mountValidation() error {
 		return err
 	}
 	rt.handle(http.MethodPost, slugValidate, "upload",
-		upload.NewValidatingHandler(root, rt.cfg.maxUploadSize, rt.cfg.logf))
+		upload.NewValidatingHandler(root, rt.cfg.MaxUploadSize, rt.cfg.Logf))
 	return nil
 }
 
@@ -115,7 +116,7 @@ func (rt *router) mountTracking() error {
 		return err
 	}
 	rt.handle(http.MethodPost, slugTracking, "upload",
-		upload.NewTrackedPipelineHandler(root, rt.cfg.maxUploadSize, rt.cfg.logf))
+		upload.NewTrackedPipelineHandler(root, rt.cfg.MaxUploadSize, rt.cfg.Logf))
 	rt.handle(http.MethodPut, slugTracking, "chunks", chunkupload.NewHandler())
 	return nil
 }
@@ -124,9 +125,9 @@ func (rt *router) mountS3() {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "S3 is not configured: start the server with -s3-bucket", http.StatusServiceUnavailable)
 	})
-	if rt.cfg.s3Uploader != nil {
+	if rt.cfg.S3Uploader != nil {
 		handler = upload.NewS3PipelineHandler(
-			rt.cfg.s3Uploader, rt.cfg.s3Bucket, rt.cfg.maxUploadSize, s3MaxUploads, s3SlotWait, rt.cfg.logf,
+			rt.cfg.S3Uploader, rt.cfg.S3Bucket, rt.cfg.MaxUploadSize, s3MaxUploads, s3SlotWait, rt.cfg.Logf,
 		)
 	}
 	rt.handle(http.MethodPost, slugS3, "upload", handler)
