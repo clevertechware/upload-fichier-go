@@ -12,6 +12,22 @@ import (
 	"github.com/clevertechware/upload-fichier-go/streamio"
 )
 
+const (
+	s3PartSize    = 5 << 20
+	s3Concurrency = 2
+	s3FailTimeout = 30 * time.Second
+)
+
+// ConfigureS3Uploader applies the article 4 settings to a transfermanager: threshold and part size at 5 MiB and
+// concurrency 2, so an upload holds about 5 + (2+1)*5 = 20 MiB whatever the file size, and a FailTimeout that lets
+// the multipart abort go through after the request context is cancelled.
+func ConfigureS3Uploader(o *transfermanager.Options) {
+	o.PartSizeBytes = s3PartSize
+	o.MultipartUploadThreshold = s3PartSize
+	o.Concurrency = s3Concurrency
+	o.FailTimeout = s3FailTimeout
+}
+
 // S3Uploader is the subset of *transfermanager.Client used by
 // NewS3PipelineHandler, narrow enough to substitute with a test double
 // pointed at a fake S3 endpoint.

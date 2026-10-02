@@ -33,7 +33,8 @@ go run ./cmd/server                              # example server on :8080
   - `receive.go`: the reception both pipelines share (`readValidatedPart`: size limit, first file part, sniff,
     validate, generated name) and `writeError`, which maps a `statusError` or `http.MaxBytesError` to the response.
   - `s3.go`: `NewS3PipelineHandler` (article 4) streams to S3 through `transfermanager.UploadObject` and a concurrency
-    semaphore (503 + `Retry-After`). It reuses `readValidatedPart`, `writeError` and `filecheck.NewHashingReader`.
+    semaphore (503 + `Retry-After`). It reuses `readValidatedPart`, `writeError` and `filecheck.NewHashingReader`; `ConfigureS3Uploader` holds the
+    transfermanager settings shared by `cmd/server` and `cmd/memprofile`.
 - `internal/filecheck/`: the HTTP-free building blocks (`SniffType`, `ValidateType`, `AllowedTypes`,
   `GenerateStoredName`, `CreateInRoot`, `HashingReader`). `upload` depends on it, never the reverse.
 - `cmd/server/`: one route per example under `/articles/<slug>/...`, slug = the article frontmatter slug, files stored

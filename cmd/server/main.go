@@ -13,15 +13,12 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	transfermanager "github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/clevertechware/upload-fichier-go/internal/upload"
 )
 
 const (
 	defaultMaxUploadSize = 32 << 20
 	readHeaderTimeout    = 10 * time.Second
-
-	s3PartSize    = 5 << 20
-	s3Concurrency = 2
-	s3FailTimeout = 30 * time.Second
 )
 
 func main() {
@@ -70,16 +67,11 @@ func run() error {
 	return srv.ListenAndServe()
 }
 
-// newS3Uploader builds the article 4 uploader: 5 MiB parts, concurrency 2, so each upload holds about 20 MiB.
+// newS3Uploader builds the article 4 uploader with upload.ConfigureS3Uploader.
 func newS3Uploader(ctx context.Context) (*transfermanager.Client, error) {
 	awsConfig, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config: %w", err)
 	}
-	return transfermanager.New(s3.NewFromConfig(awsConfig), func(o *transfermanager.Options) {
-		o.PartSizeBytes = s3PartSize
-		o.MultipartUploadThreshold = s3PartSize
-		o.Concurrency = s3Concurrency
-		o.FailTimeout = s3FailTimeout
-	}), nil
+	return transfermanager.New(s3.NewFromConfig(awsConfig), upload.ConfigureS3Uploader), nil
 }

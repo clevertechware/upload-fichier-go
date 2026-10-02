@@ -71,7 +71,7 @@ Même méthode que l'article 1 (`cmd/memprofile`), avec deux ajouts :
 
 - Le corps multipart généré (`s3MultipartBody` dans `cmd/memprofile/s3discard.go`) commence par la signature PNG (8 octets), pour que le sniffing de `NewS3PipelineHandler` accepte le flux ; le reste du contenu est le même motif déterministe que l'article 1.
 - L'approche « Flux vers S3 » n'utilise pas de faux serveur S3 en mémoire dans le même processus (ça aurait faussé la mesure de heap, en gardant les octets uploadés). Elle passe un `discardS3Client` — une implémentation directe de l'interface `S3APIClient` du transfermanager, sans aucune requête HTTP, qui fait `io.Copy(io.Discard, ...)` sur chaque corps de part avant de renvoyer une réponse minimale valide. Seule la mémoire côté client (pipeline HTTP du handler + pool de buffers du transfermanager) est mesurée. Ce client court-circuite toute la pile du SDK S3 (signature SigV4, calcul CRC32, transport HTTP, TLS), dont le coût mémoire n'est donc pas compris dans ces chiffres.
-- Réglages du transfermanager dans cette mesure, identiques à ceux recommandés dans l'article : `PartSizeBytes` 5 Mio, `MultipartUploadThreshold` 5 Mio, `Concurrency` 2, `FailTimeout` 30 s. Borne théorique : `Threshold + (Concurrency+1) × PartSize` = 5 + 3 × 5 = **20 Mio par upload**.
+- Réglages du transfermanager dans cette mesure, identiques à ceux recommandés dans l'article, partagés avec le serveur via `upload.ConfigureS3Uploader` : `PartSizeBytes` 5 Mio, `MultipartUploadThreshold` 5 Mio, `Concurrency` 2, `FailTimeout` 30 s. Borne théorique : `Threshold + (Concurrency+1) × PartSize` = 5 + 3 × 5 = **20 Mio par upload**.
 
 ### Environnement
 
