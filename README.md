@@ -23,13 +23,27 @@ golangci-lint run ./...                         # lint strict (.golangci.yml), d
 go test ./...                                   # tests unitaires et d'intégration
 go test -race ./...                             # idem, avec le détecteur de races
 
-go test ./internal/upload/ -bench . -run '^$'   # benchmarks mémoire de l'article 1
-go run ./cmd/memprofile -size=1073741824        # pic de heap / fichiers temporaires / débit, un upload de 1 Go
-go run ./cmd/memprofile -size=1073741824 -only="FormFile,S3"  # ne comparer que FormFile et le flux S3 (article 4)
 go run ./cmd/server                             # serveur d'exemple sur :8080 (voir « Routes par article »)
 ```
 
-Les résultats bruts des benchmarks et du memprofile sont dans [`BENCHMARK.md`](./BENCHMARK.md).
+### Reproduire les mesures de BENCHMARK.md
+
+```bash
+# article 1 : allocations et débit par requête (1 / 64 / 256 MiB)
+go test ./internal/upload/ -run '^$' -bench . -benchtime=3x -timeout 600s
+
+# article 1 : pic de heap, fichiers temporaires et débit, un upload de 1 Go
+go run ./cmd/memprofile -size=1073741824 -sample-every=10ms
+
+# article 4 : FormFile contre le flux S3, à 100 Mio puis à 1 Gio
+go run ./cmd/memprofile -size=104857600 -only="FormFile,S3" -sample-every=2ms
+go run ./cmd/memprofile -size=1073741824 -only="FormFile,S3" -sample-every=10ms
+```
+
+- À 1 Go, `ReadAll` accumule tout le corps en mémoire, puis le multipart reader en fait une seconde copie : prévoir
+  assez de RAM, ou l'exclure avec `-only`.
+- Les chiffres de [`BENCHMARK.md`](./BENCHMARK.md) viennent d'un Apple M5 Max : le débit varie selon la machine, le
+  pic de heap reste du même ordre de grandeur.
 
 ## Structure
 
