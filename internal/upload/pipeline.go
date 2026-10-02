@@ -109,6 +109,8 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			return
 		}
 
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		//nolint:gosec // G705: served as text/plain
 		fmt.Fprintf(w, "stored %s as %s (sha256 %s)\n", part.FileName(), storedName, hashed.Sum())
 	}
 }

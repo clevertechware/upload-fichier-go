@@ -4,6 +4,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,11 +12,17 @@ import (
 	"time"
 )
 
-const chunkSize = 5 << 20 // 5 MiB
+const (
+	chunkSize      = 5 << 20 // 5 MiB
+	requestTimeout = 30 * time.Second
+)
+
+// ErrChunkRejected is returned when the server answers a chunk with a non-200 status.
+var ErrChunkRejected = errors.New("server rejected chunk")
 
 // httpClient is used for every chunk upload instead of http.DefaultClient,
 // which has no timeout and would hang forever on a stalled connection.
-var httpClient = &http.Client{Timeout: 30 * time.Second}
+var httpClient = &http.Client{Timeout: requestTimeout}
 
 // UploadInChunks reads f in chunkSize pieces and sends each one to endpoint
 // with sendChunk. A short final read (less than chunkSize) is a normal way
@@ -32,7 +39,7 @@ func UploadInChunks(ctx context.Context, endpoint string, f io.Reader) error {
 			}
 			chunkIndex++
 		}
-		if readErr == io.EOF || readErr == io.ErrUnexpectedEOF {
+		if errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrUnexpectedEOF) {
 			break
 		}
 		if readErr != nil {
@@ -58,7 +65,7 @@ func sendChunk(ctx context.Context, endpoint string, chunkIndex int, data []byte
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server rejected chunk %d: %s", chunkIndex, resp.Status)
+		return fmt.Errorf("%w %d: %s", ErrChunkRejected, chunkIndex, resp.Status)
 	}
 	return nil
 }

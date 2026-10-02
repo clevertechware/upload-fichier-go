@@ -115,6 +115,8 @@ func NewS3PipelineHandler(
 			return
 		}
 
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		//nolint:gosec // G705: served as text/plain
 		fmt.Fprintf(w, "stored %s as s3://%s/%s (sha256 %s)\n", part.FileName(), bucket, key, hashed.Sum())
 	}
 }
