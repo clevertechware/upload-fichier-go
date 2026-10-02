@@ -241,11 +241,8 @@ func TestS3PipelineHandlerAbortsMultipartUploadOnContextCancellation(t *testing.
 	}
 }
 
-// TestS3PipelineHandlerLimitsConcurrentUploads drives two requests through a
-// handler whose semaphore only has room for one: the first blocks mid-read
-// (simulating an in-flight upload) and holds the only slot, so the second
-// must be turned away with 503 and a Retry-After once its wait for a slot
-// runs out.
+// TestS3PipelineHandlerLimitsConcurrentUploads: the first request blocks mid-read and holds the only slot, so the
+// second is turned away with 503 and a Retry-After.
 func TestS3PipelineHandlerLimitsConcurrentUploads(t *testing.T) {
 	t.Parallel()
 	client, bucket := newFakeS3(t)

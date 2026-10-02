@@ -22,11 +22,9 @@ type Logf func(format string, args ...any)
 // validation pipeline itself knowing that behavior exists.
 type wrapReaderFunc func(ctx context.Context, r io.Reader, storedName string) io.Reader
 
-// newPipelineHandler builds the shared pipeline: bound the request size,
-// take the first file part, sniff and validate its real content type, hash
-// it in passing, and write it under a server-generated name confined to
-// root. wrap is applied to the hashing reader right before the copy; a nil
-// wrap copies from it unchanged.
+// newPipelineHandler builds the pipeline shared by articles 2 and 3: readValidatedPart, then hash the file in passing
+// and write it under its generated name confined to root. wrap is applied to the hashing reader right before the
+// copy; a nil wrap copies from it unchanged.
 func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrapReaderFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		received, err := readValidatedPart(w, r, maxUploadSize)
@@ -79,10 +77,8 @@ func cleanupFailedUpload(root *os.Root, dst *os.File, storedName string, logf Lo
 	}
 }
 
-// NewValidatingHandler builds the article 2 pipeline: bound the request
-// size, stream the multipart part, sniff and validate its real content
-// type, hash it in passing, and write it under a server-generated name
-// confined to root. A failed or oversized copy removes the partial file.
+// NewValidatingHandler builds the article 2 pipeline: validated reception, sha256 in passing, and storage under a
+// server-generated name confined to root. A failed or oversized copy removes the partial file.
 func NewValidatingHandler(root *os.Root, maxUploadSize int64, logf Logf) http.HandlerFunc {
 	return newPipelineHandler(root, maxUploadSize, logf, nil)
 }

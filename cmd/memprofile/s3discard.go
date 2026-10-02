@@ -14,10 +14,8 @@ import (
 // image/png; the sniffing pipeline only ever looks at these bytes.
 var pngSignature = []byte{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a}
 
-// s3MultipartBody streams a single-file multipart body of size bytes,
-// starting with the PNG signature so NewS3PipelineHandler's content sniffing
-// accepts it, through an io.Pipe so the generator never holds more than one
-// write buffer's worth of the payload at a time.
+// s3MultipartBody is genfile.MultipartBody with a payload starting with the PNG signature, so the S3 handler's
+// content sniffing accepts it.
 func s3MultipartBody(fieldName, filename string, size int64) (io.ReadCloser, string) {
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)

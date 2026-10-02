@@ -37,18 +37,13 @@ type S3Uploader interface {
 	) (*transfermanager.UploadObjectOutput, error)
 }
 
-// NewS3PipelineHandler builds the article 4 pipeline: the same validation
-// steps as NewTrackedPipelineHandler (bound the request size with
-// MaxBytesReader, take the first file part, sniff and validate its real
-// content type, hash it in passing, track its progress) but the destination
-// is an S3 object instead of a file confined under root.
+// NewS3PipelineHandler builds the article 4 pipeline: the same reception, hashing and progress tracking as
+// NewTrackedPipelineHandler, but the destination is an S3 object instead of a file confined under root.
 //
-// r.Context() is passed to UploadObject so that a server-side cancellation
-// (or a handler timeout) stops the in-flight UploadPart calls. A client
-// disconnect on HTTP/1.1 surfaces first as a read error on the request body,
-// which fails the upload the same way. Either way the transfermanager then
-// aborts the multipart upload, but with the caller's context: the uploader
-// must set Options.FailTimeout, otherwise the abort is sent with an already
+// r.Context() is passed to UploadObject so that a server-side cancellation (or a handler timeout) stops the in-flight
+// UploadPart calls. A client disconnect on HTTP/1.1 surfaces first as a read error on the request body, which fails
+// the upload the same way. Either way the transfermanager aborts the multipart upload with the caller's context: the
+// uploader must set Options.FailTimeout (see ConfigureS3Uploader), otherwise the abort is sent with an already
 // cancelled context, fails, and leaves the multipart upload open.
 //
 // maxConcurrentUploads (at least 1, otherwise this panics) bounds how many

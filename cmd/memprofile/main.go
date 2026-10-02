@@ -79,8 +79,7 @@ func main() {
 	}
 }
 
-// newApproaches lists the compared handlers. The S3 one uses the settings recommended in article 4: threshold and
-// part size at 5 MiB, concurrency 2, so the bound is 5 + (2+1)*5 = 20 MiB per upload whatever the file size.
+// newApproaches lists the compared handlers. The S3 one uses the settings of upload.ConfigureS3Uploader.
 func newApproaches(maxUploadSize int64) []approach {
 	return []approach{
 		{"io.ReadAll", upload.NewReadAllHandler},
