@@ -19,13 +19,14 @@ Voir [Dépendances externes](#dépendances-externes-article-4) plus bas.
 ```bash
 go build ./...                                  # compile tout le module
 go vet ./...                                    # analyse statique
+golangci-lint run ./...                         # lint strict (.golangci.yml), doit rester à 0 problème
 go test ./...                                   # tests unitaires et d'intégration
 go test -race ./...                             # idem, avec le détecteur de races
 
 go test ./internal/upload/ -bench . -run '^$'   # benchmarks mémoire de l'article 1
 go run ./cmd/memprofile -size=1073741824        # pic de heap / fichiers temporaires / débit, un upload de 1 Go
 go run ./cmd/memprofile -size=1073741824 -only="FormFile,S3"  # ne comparer que FormFile et le flux S3 (article 4)
-go run ./cmd/server                             # serveur d'exemple sur :8080
+go run ./cmd/server                             # serveur d'exemple sur :8080 (voir « Routes par article »)
 ```
 
 Les résultats bruts des benchmarks et du memprofile sont dans [`BENCHMARK.md`](./BENCHMARK.md).
@@ -34,13 +35,30 @@ Les résultats bruts des benchmarks et du memprofile sont dans [`BENCHMARK.md`](
 
 ```
 client/               client par morceaux (article 3) : UploadInChunks, sendChunk
-cmd/server/            serveur HTTP d'exemple : POST /upload (pipeline suivi), PUT /chunks
+cmd/server/            serveur HTTP d'exemple : une route par exemple, sous /articles/<slug>/
 cmd/memprofile/        mesure comparative des approches de réception (articles 1 et 4)
 deploy/                règle de cycle de vie S3 AbortIncompleteMultipartUpload (article 4)
 internal/chunkupload/  handler de démo qui réassemble les morceaux envoyés par client/ (ne pas exposer)
 internal/genfile/      génère des corps multipart de test en flux, sans les charger en mémoire
 internal/upload/       les handlers de réception, le pipeline (validation, version suivie, S3), sniffing, hash, stockage
 streamio/              TrackedReader : progression throttlée + annulation par contexte (article 3)
+```
+
+## Routes par article
+
+Chaque exemple est servi sous `/articles/<slug>/`, le slug étant celui de l'article. Les fichiers reçus sont écrits
+dans `<dest>/<slug>/` (`./uploads/<slug>/` par défaut).
+
+| Article | Route |
+|---|---|
+| 1 — `uploader-fichier-go-sans-exploser-memoire` | `POST /articles/<slug>/read-all`, `.../form-file`, `.../multipart-reader` |
+| 2 — `empiler-des-io-reader-pour-valider-un-upload` | `POST /articles/<slug>/upload` |
+| 3 — `ecrire-son-propre-io-reader-en-go` | `POST /articles/<slug>/upload`, `PUT /articles/<slug>/chunks` |
+| 4 — `streamer-un-upload-go-vers-s3-sans-toucher-le-disque` | `POST /articles/<slug>/upload` (503 sans `-s3-bucket`) |
+
+```bash
+curl -F file=@image.png http://localhost:8080/articles/empiler-des-io-reader-pour-valider-un-upload/upload
+go run ./cmd/server -s3-bucket=mon-bucket   # active la route de l'article 4 (AWS_ENDPOINT_URL_S3 pour MinIO/LocalStack)
 ```
 
 ## Correspondance article / code
