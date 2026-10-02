@@ -30,6 +30,7 @@ func drainInChunks(t *testing.T, r io.Reader, chunkSize int) {
 }
 
 func TestTrackedReaderThrottlesProgressCallbacks(t *testing.T) {
+	t.Parallel()
 	data := bytes.Repeat([]byte("x"), 2<<20) // 2 MiB, read in 4 KiB chunks below.
 	src := bytes.NewReader(data)
 
@@ -53,6 +54,7 @@ func TestTrackedReaderThrottlesProgressCallbacks(t *testing.T) {
 }
 
 func TestTrackedReaderReportsFinalCallbackOnEOF(t *testing.T) {
+	t.Parallel()
 	// Large enough, read through a small fixed buffer, that most of the many
 	// intermediate Read calls fall inside the 200ms throttle window and are
 	// suppressed: only the EOF branch can make the last callback report the
@@ -75,6 +77,7 @@ func TestTrackedReaderReportsFinalCallbackOnEOF(t *testing.T) {
 }
 
 func TestTrackedReaderReadReturnsCancellationBeforeReading(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

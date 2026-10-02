@@ -50,14 +50,18 @@ func s3MultipartBody(fieldName, filename string, size int64) (io.ReadCloser, str
 // doesn't inflate the heap measurement it's used for.
 type discardS3Client struct{}
 
-func (discardS3Client) PutObject(_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+func (discardS3Client) PutObject(
+	_ context.Context, in *s3.PutObjectInput, _ ...func(*s3.Options),
+) (*s3.PutObjectOutput, error) {
 	if _, err := io.Copy(io.Discard, in.Body); err != nil {
 		return nil, err
 	}
 	return &s3.PutObjectOutput{}, nil
 }
 
-func (discardS3Client) UploadPart(_ context.Context, in *s3.UploadPartInput, _ ...func(*s3.Options)) (*s3.UploadPartOutput, error) {
+func (discardS3Client) UploadPart(
+	_ context.Context, in *s3.UploadPartInput, _ ...func(*s3.Options),
+) (*s3.UploadPartOutput, error) {
 	if _, err := io.Copy(io.Discard, in.Body); err != nil {
 		return nil, err
 	}
@@ -65,28 +69,40 @@ func (discardS3Client) UploadPart(_ context.Context, in *s3.UploadPartInput, _ .
 	return &s3.UploadPartOutput{ETag: &etag}, nil
 }
 
-func (discardS3Client) CreateMultipartUpload(_ context.Context, in *s3.CreateMultipartUploadInput, _ ...func(*s3.Options)) (*s3.CreateMultipartUploadOutput, error) {
+func (discardS3Client) CreateMultipartUpload(
+	_ context.Context, in *s3.CreateMultipartUploadInput, _ ...func(*s3.Options),
+) (*s3.CreateMultipartUploadOutput, error) {
 	uploadID := "discarded-upload"
 	return &s3.CreateMultipartUploadOutput{UploadId: &uploadID, Bucket: in.Bucket, Key: in.Key}, nil
 }
 
-func (discardS3Client) CompleteMultipartUpload(_ context.Context, in *s3.CompleteMultipartUploadInput, _ ...func(*s3.Options)) (*s3.CompleteMultipartUploadOutput, error) {
+func (discardS3Client) CompleteMultipartUpload(
+	_ context.Context, in *s3.CompleteMultipartUploadInput, _ ...func(*s3.Options),
+) (*s3.CompleteMultipartUploadOutput, error) {
 	return &s3.CompleteMultipartUploadOutput{Bucket: in.Bucket, Key: in.Key}, nil
 }
 
-func (discardS3Client) AbortMultipartUpload(_ context.Context, _ *s3.AbortMultipartUploadInput, _ ...func(*s3.Options)) (*s3.AbortMultipartUploadOutput, error) {
+func (discardS3Client) AbortMultipartUpload(
+	_ context.Context, _ *s3.AbortMultipartUploadInput, _ ...func(*s3.Options),
+) (*s3.AbortMultipartUploadOutput, error) {
 	return &s3.AbortMultipartUploadOutput{}, nil
 }
 
-func (discardS3Client) GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+func (discardS3Client) GetObject(
+	context.Context, *s3.GetObjectInput, ...func(*s3.Options),
+) (*s3.GetObjectOutput, error) {
 	return nil, errNotImplemented
 }
 
-func (discardS3Client) HeadObject(context.Context, *s3.HeadObjectInput, ...func(*s3.Options)) (*s3.HeadObjectOutput, error) {
+func (discardS3Client) HeadObject(
+	context.Context, *s3.HeadObjectInput, ...func(*s3.Options),
+) (*s3.HeadObjectOutput, error) {
 	return nil, errNotImplemented
 }
 
-func (discardS3Client) ListObjectsV2(context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
+func (discardS3Client) ListObjectsV2(
+	context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options),
+) (*s3.ListObjectsV2Output, error) {
 	return nil, errNotImplemented
 }
 

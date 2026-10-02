@@ -1,48 +1,85 @@
-// Command server exposes the upload pipeline built across the three
-// articles: POST /upload for a single streamed file, PUT /chunks for the
-// chunked client from the third article.
+// Command server exposes every example of the upload series under
+// /articles/<slug>/, one prefix per blog article. See routes.go for the list.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
-	"github.com/clevertechware/upload-fichier-go/internal/chunkupload"
-	"github.com/clevertechware/upload-fichier-go/internal/upload"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	transfermanager "github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+)
+
+const (
+	defaultMaxUploadSize = 32 << 20
+	readHeaderTimeout    = 10 * time.Second
+
+	s3PartSize    = 5 << 20
+	s3Concurrency = 2
+	s3FailTimeout = 30 * time.Second
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	addr := flag.String("addr", ":8080", "listen address")
-	dest := flag.String("dest", "./uploads", "directory uploads are stored under")
-	maxUploadSize := flag.Int64("max-upload-size", 32<<20, "maximum accepted upload size in bytes")
+	dest := flag.String("dest", "./uploads", "directory the examples store uploads under, one sub-directory per article")
+	maxUploadSize := flag.Int64("max-upload-size", defaultMaxUploadSize, "maximum accepted upload size in bytes")
+	s3Bucket := flag.String("s3-bucket", "", "S3 bucket enabling the article 4 route; credentials come from the AWS "+
+		"default chain, and AWS_ENDPOINT_URL_S3 points it at MinIO or LocalStack")
 	flag.Parse()
 
-	if err := os.MkdirAll(*dest, 0o755); err != nil {
-		log.Fatalf("create upload directory: %v", err)
+	cfg := config{dest: *dest, maxUploadSize: *maxUploadSize, logf: log.Printf, s3Bucket: *s3Bucket}
+	if *s3Bucket != "" {
+		uploader, err := newS3Uploader(context.Background())
+		if err != nil {
+			return err
+		}
+		cfg.s3Uploader = uploader
 	}
 
-	root, err := os.OpenRoot(*dest)
+	routes, err := newRouter(cfg)
 	if err != nil {
-		log.Fatalf("open upload directory as root: %v", err)
+		return err
 	}
-	defer root.Close()
-
-	mux := http.NewServeMux()
-	mux.Handle("POST /upload", upload.NewTrackedPipelineHandler(root, *maxUploadSize, log.Printf))
-	mux.Handle("PUT /chunks", chunkupload.NewHandler())
+	defer func() {
+		if closeErr := routes.close(); closeErr != nil {
+			log.Printf("close upload directories: %v", closeErr)
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:    *addr,
-		Handler: mux,
+		Handler: routes.mux,
 		// ReadTimeout would also bound the time to read the body, which
 		// breaks large uploads; use http.ResponseController.SetReadDeadline
 		// per request instead if a per-request read deadline is needed.
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	log.Printf("listening on %s, storing uploads under %s", *addr, *dest)
-	log.Fatal(srv.ListenAndServe())
+	return srv.ListenAndServe()
+}
+
+// newS3Uploader builds the article 4 uploader: 5 MiB parts, concurrency 2, so each upload holds about 20 MiB.
+func newS3Uploader(ctx context.Context) (*transfermanager.Client, error) {
+	awsConfig, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config: %w", err)
+	}
+	return transfermanager.New(s3.NewFromConfig(awsConfig), func(o *transfermanager.Options) {
+		o.PartSizeBytes = s3PartSize
+		o.MultipartUploadThreshold = s3PartSize
+		o.Concurrency = s3Concurrency
+		o.FailTimeout = s3FailTimeout
+	}), nil
 }

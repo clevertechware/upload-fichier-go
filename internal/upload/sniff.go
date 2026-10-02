@@ -8,6 +8,9 @@ import (
 	"net/http"
 )
 
+// sniffLen is the number of bytes http.DetectContentType looks at.
+const sniffLen = 512
+
 // ErrUnsupportedType is returned by ValidateType when the sniffed content
 // type isn't in AllowedTypes.
 var ErrUnsupportedType = errors.New("unsupported content type")
@@ -21,10 +24,10 @@ var AllowedTypes = map[string]string{
 	"application/pdf": ".pdf",
 }
 
-// SniffType peeks at the first 512 bytes of br without consuming them and
+// SniffType peeks at the first sniffLen bytes of br without consuming them and
 // returns the MIME type detected by http.DetectContentType.
 func SniffType(br *bufio.Reader) (string, error) {
-	head, err := br.Peek(512)
+	head, err := br.Peek(sniffLen)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("peek content: %w", err)
 	}

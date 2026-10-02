@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+const storedNameBytes = 16
+
 // GenerateStoredName returns a random, collision-resistant filename for
 // storing an upload. The extension comes from the sniffed contentType, via
 // AllowedTypes, never from the client-supplied name: a PNG uploaded as
@@ -15,10 +17,10 @@ import (
 func GenerateStoredName(contentType string) (string, error) {
 	ext, ok := AllowedTypes[contentType]
 	if !ok {
-		return "", fmt.Errorf("generate stored name: no extension mapped for content type %q", contentType)
+		return "", fmt.Errorf("generate stored name: %w: %q", ErrUnsupportedType, contentType)
 	}
 
-	buf := make([]byte, 16)
+	buf := make([]byte, storedNameBytes)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("generate stored name: %w", err)
 	}

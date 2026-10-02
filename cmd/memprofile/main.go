@@ -4,6 +4,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -18,6 +20,27 @@ import (
 	transfermanager "github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/clevertechware/upload-fichier-go/internal/upload"
 )
+
+const (
+	mebibyte = 1 << 20
+
+	defaultPayloadSize = 256 * mebibyte
+	defaultSampleEvery = 5 * time.Millisecond
+	formFileMaxMemory  = 32 * mebibyte
+	sizeMargin         = mebibyte
+
+	s3PartSize       = 5 * mebibyte
+	s3Concurrency    = 2
+	s3FailTimeout    = 30 * time.Second
+	s3MaxUploads     = 4
+	s3SlotWait       = time.Minute
+	s3Bucket         = "memprofile-bucket"
+	multipartPrefix  = "multipart-"
+	payloadFileName  = "payload.png"
+	payloadFieldName = "file"
+)
+
+var errUnexpectedStatus = errors.New("unexpected status")
 
 type approach struct {
 	name    string
@@ -34,94 +57,101 @@ type result struct {
 }
 
 func main() {
-	size := flag.Int64("size", 256<<20, "payload size in bytes")
-	sampleEvery := flag.Duration("sample-every", 5*time.Millisecond, "memory/disk sampling interval")
+	size := flag.Int64("size", defaultPayloadSize, "payload size in bytes")
+	sampleEvery := flag.Duration("sample-every", defaultSampleEvery, "memory/disk sampling interval")
 	only := flag.String("only", "", "comma-separated substring filter on approach names; empty runs all")
 	flag.Parse()
 
-	approaches := []approach{
-		{"io.ReadAll", upload.NewReadAllHandler},
-		{"ParseMultipartForm / FormFile", func(dest string) http.HandlerFunc {
-			return upload.NewFormFileHandler(dest, 32<<20)
-		}},
-		{"MultipartReader en flux", func(dest string) http.HandlerFunc {
-			return upload.NewMultipartReaderHandler(dest, *size+1<<20)
-		}},
-		{"Flux vers S3 (transfermanager)", func(dest string) http.HandlerFunc {
-			// Same settings recommended in article 4: threshold and part size
-			// at 5 MiB, concurrency 2, so the theoretical bound is
-			// 5 + (2+1)*5 = 20 MiB per upload, independent of file size.
-			uploader := transfermanager.New(discardS3Client{}, func(o *transfermanager.Options) {
-				o.PartSizeBytes = 5 << 20
-				o.MultipartUploadThreshold = 5 << 20
-				o.Concurrency = 2
-				o.FailTimeout = 30 * time.Second
-			})
-			return upload.NewS3PipelineHandler(uploader, "memprofile-bucket", *size+1<<20, 4, time.Minute, func(string, ...any) {})
-		}},
-	}
-
+	approaches := newApproaches(*size + sizeMargin)
 	if *only != "" {
 		approaches = filterApproaches(approaches, strings.Split(*only, ","))
 	}
 
-	fmt.Printf("Taille testée : %d octets (%.1f MiB)\n\n", *size, float64(*size)/(1<<20))
-
 	results := make([]result, 0, len(approaches))
-	for _, a := range approaches {
-		r, err := measure(a, *size, *sampleEvery)
+	for _, candidate := range approaches {
+		res, err := measure(candidate, *size, *sampleEvery)
 		if err != nil {
-			log.Fatalf("measuring %s: %v", a.name, err)
+			log.Fatalf("measuring %s: %v", candidate.name, err)
 		}
-		results = append(results, r)
+		results = append(results, res)
 	}
 
-	fmt.Println("| Approche | Pic mémoire (heap) | Fichiers temporaires | Débit |")
-	fmt.Println("|---|---|---|---|")
-	for _, r := range results {
-		tmp := "Non"
-		if r.tempFiles > 0 {
-			tmp = fmt.Sprintf("Oui (%d)", r.tempFiles)
-		}
-		fmt.Printf("| `%s` | %.1f MiB (delta %.1f MiB) | %s | %.1f MiB/s |\n",
-			r.approach, float64(r.peakHeapBytes)/(1<<20), float64(r.peakHeapDelta)/(1<<20), tmp, r.throughputMBs)
+	report := fmt.Sprintf("Taille testée : %d octets (%.1f MiB)\n\n%s", *size, mib(float64(*size)), markdownTable(results))
+	if _, err := os.Stdout.WriteString(report); err != nil {
+		log.Fatalf("write report: %v", err)
 	}
 }
 
-func measure(a approach, size int64, sampleEvery time.Duration) (result, error) {
+// newApproaches lists the compared handlers. The S3 one uses the settings recommended in article 4: threshold and
+// part size at 5 MiB, concurrency 2, so the bound is 5 + (2+1)*5 = 20 MiB per upload whatever the file size.
+func newApproaches(maxUploadSize int64) []approach {
+	return []approach{
+		{"io.ReadAll", upload.NewReadAllHandler},
+		{"ParseMultipartForm / FormFile", func(dest string) http.HandlerFunc {
+			return upload.NewFormFileHandler(dest, formFileMaxMemory)
+		}},
+		{"MultipartReader en flux", func(dest string) http.HandlerFunc {
+			return upload.NewMultipartReaderHandler(dest, maxUploadSize)
+		}},
+		{"Flux vers S3 (transfermanager)", func(string) http.HandlerFunc {
+			uploader := transfermanager.New(discardS3Client{}, func(o *transfermanager.Options) {
+				o.PartSizeBytes = s3PartSize
+				o.MultipartUploadThreshold = s3PartSize
+				o.Concurrency = s3Concurrency
+				o.FailTimeout = s3FailTimeout
+			})
+			return upload.NewS3PipelineHandler(
+				uploader, s3Bucket, maxUploadSize, s3MaxUploads, s3SlotWait, func(string, ...any) {},
+			)
+		}},
+	}
+}
+
+func markdownTable(results []result) string {
+	var table strings.Builder
+	table.WriteString("| Approche | Pic mémoire (heap) | Fichiers temporaires | Débit |\n")
+	table.WriteString("|---|---|---|---|\n")
+	for i := range results {
+		res := &results[i]
+		tempFiles := "Non"
+		if res.tempFiles > 0 {
+			tempFiles = fmt.Sprintf("Oui (%d)", res.tempFiles)
+		}
+		fmt.Fprintf(&table, "| `%s` | %.1f MiB (delta %.1f MiB) | %s | %.1f MiB/s |\n",
+			res.approach, mib(float64(res.peakHeapBytes)), mib(float64(res.peakHeapDelta)), tempFiles, res.throughputMBs)
+	}
+	return table.String()
+}
+
+func mib(bytes float64) float64 {
+	return bytes / mebibyte
+}
+
+func measure(candidate approach, size int64, sampleEvery time.Duration) (result, error) {
 	storeDir, err := os.MkdirTemp("", "memprofile-store-")
 	if err != nil {
 		return result{}, fmt.Errorf("create store dir: %w", err)
 	}
-	defer os.RemoveAll(storeDir)
+	defer removeAll(storeDir)
 
 	tmpDir, err := os.MkdirTemp("", "memprofile-tmp-")
 	if err != nil {
 		return result{}, fmt.Errorf("create tmp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer removeAll(tmpDir)
 
-	prevTMPDIR, hadTMPDIR := os.LookupEnv("TMPDIR")
-	if err := os.Setenv("TMPDIR", tmpDir); err != nil {
-		return result{}, fmt.Errorf("set TMPDIR: %w", err)
+	restoreTMPDIR, err := redirectTMPDIR(tmpDir)
+	if err != nil {
+		return result{}, err
 	}
-	defer func() {
-		if hadTMPDIR {
-			if err := os.Setenv("TMPDIR", prevTMPDIR); err != nil {
-				log.Printf("restore TMPDIR: %v", err)
-			}
-		} else if err := os.Unsetenv("TMPDIR"); err != nil {
-			log.Printf("unset TMPDIR: %v", err)
-		}
-	}()
+	defer restoreTMPDIR()
 
-	handler := a.handler(storeDir)
-	server := httptest.NewServer(handler)
+	server := httptest.NewServer(candidate.handler(storeDir))
 	defer server.Close()
 
 	// PNG-prefixed so the S3 approach's content sniffing accepts the body too;
 	// the other approaches store bytes as-is and don't care about the prefix.
-	body, contentType := s3MultipartBody("file", "payload.png", size)
+	body, contentType := s3MultipartBody(payloadFieldName, payloadFileName, size)
 
 	runtime.GC()
 	var baseline runtime.MemStats
@@ -131,41 +161,73 @@ func measure(a approach, size int64, sampleEvery time.Duration) (result, error) 
 	sampled := make(chan sample)
 	go sampleUsage(tmpDir, sampleEvery, stop, sampled)
 
-	start := time.Now()
-	req, err := http.NewRequest(http.MethodPost, server.URL, body)
+	duration, err := postBody(server.URL, contentType, body)
+	close(stop)
+	peak := <-sampled
 	if err != nil {
-		close(stop)
-		return result{}, fmt.Errorf("build request: %w", err)
+		return result{}, err
+	}
+
+	return result{
+		approach:      candidate.name,
+		peakHeapBytes: peak.peakHeapInuse,
+		peakHeapDelta: int64(peak.peakHeapInuse) - int64(baseline.HeapInuse),
+		tempFiles:     peak.peakTempFiles,
+		duration:      duration,
+		throughputMBs: mib(float64(size)) / duration.Seconds(),
+	}, nil
+}
+
+func postBody(url, contentType string, body io.Reader) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, url, body)
+	if err != nil {
+		return 0, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", contentType)
 
+	start := time.Now()
 	resp, err := http.DefaultClient.Do(req)
 	duration := time.Since(start)
-	close(stop)
-	s := <-sampled
-
 	if err != nil {
-		return result{}, fmt.Errorf("do request: %w", err)
+		return 0, fmt.Errorf("do request: %w", err)
 	}
 	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusOK {
 		respBody, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return result{}, fmt.Errorf("unexpected status %d, body unreadable: %w", resp.StatusCode, readErr)
+			return 0, fmt.Errorf("%w %d, body unreadable: %w", errUnexpectedStatus, resp.StatusCode, readErr)
 		}
-		return result{}, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, respBody)
+		return 0, fmt.Errorf("%w %d: %s", errUnexpectedStatus, resp.StatusCode, respBody)
+	}
+	return duration, nil
+}
+
+// redirectTMPDIR points os.TempDir at dir so mime/multipart spills land where countMultipartFiles looks, and returns
+// the function that restores the previous value.
+func redirectTMPDIR(dir string) (func(), error) {
+	previous, hadPrevious := os.LookupEnv("TMPDIR")
+	if err := os.Setenv("TMPDIR", dir); err != nil {
+		return nil, fmt.Errorf("set TMPDIR: %w", err)
 	}
 
-	throughputMBs := float64(size) / (1 << 20) / duration.Seconds()
-
-	return result{
-		approach:      a.name,
-		peakHeapBytes: s.peakHeapInuse,
-		peakHeapDelta: int64(s.peakHeapInuse) - int64(baseline.HeapInuse),
-		tempFiles:     s.peakTempFiles,
-		duration:      duration,
-		throughputMBs: throughputMBs,
+	return func() {
+		var err error
+		if hadPrevious {
+			err = os.Setenv("TMPDIR", previous)
+		} else {
+			err = os.Unsetenv("TMPDIR")
+		}
+		if err != nil {
+			log.Printf("restore TMPDIR: %v", err)
+		}
 	}, nil
+}
+
+func removeAll(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		log.Printf("remove %s: %v", path, err)
+	}
 }
 
 type sample struct {
@@ -177,20 +239,16 @@ func sampleUsage(tmpDir string, every time.Duration, stop <-chan struct{}, out c
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 
-	var s sample
+	var peak sample
 	for {
 		select {
 		case <-ticker.C:
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			if m.HeapInuse > s.peakHeapInuse {
-				s.peakHeapInuse = m.HeapInuse
-			}
-			if n := countMultipartFiles(tmpDir); n > s.peakTempFiles {
-				s.peakTempFiles = n
-			}
+			var mem runtime.MemStats
+			runtime.ReadMemStats(&mem)
+			peak.peakHeapInuse = max(peak.peakHeapInuse, mem.HeapInuse)
+			peak.peakTempFiles = max(peak.peakTempFiles, countMultipartFiles(tmpDir))
 		case <-stop:
-			out <- s
+			out <- peak
 			return
 		}
 	}
@@ -201,10 +259,10 @@ func sampleUsage(tmpDir string, every time.Duration, stop <-chan struct{}, out c
 // instead of paying for all of them at large sizes.
 func filterApproaches(approaches []approach, substrings []string) []approach {
 	kept := make([]approach, 0, len(approaches))
-	for _, a := range approaches {
-		for _, s := range substrings {
-			if strings.Contains(a.name, strings.TrimSpace(s)) {
-				kept = append(kept, a)
+	for _, candidate := range approaches {
+		for _, substring := range substrings {
+			if strings.Contains(candidate.name, strings.TrimSpace(substring)) {
+				kept = append(kept, candidate)
 				break
 			}
 		}
@@ -220,8 +278,8 @@ func countMultipartFiles(dir string) int {
 		return 0
 	}
 	count := 0
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "multipart-") {
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), multipartPrefix) {
 			count++
 		}
 	}

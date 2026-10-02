@@ -31,7 +31,7 @@ func nextFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 		if part.FileName() != "" {
 			return part, nil
 		}
-		part.Close()
+		_ = part.Close()
 	}
 }
 
@@ -68,7 +68,7 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			http.Error(w, "cannot read file header", http.StatusBadRequest)
 			return
 		}
-		if err := ValidateType(contentType); err != nil {
+		if err = ValidateType(contentType); err != nil {
 			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
 			return
 		}
@@ -91,7 +91,7 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			source = wrap(r.Context(), source, storedName)
 		}
 
-		if _, err := io.Copy(dst, source); err != nil {
+		if _, err = io.Copy(dst, source); err != nil {
 			cleanupFailedUpload(root, dst, storedName, logf)
 
 			var maxErr *http.MaxBytesError
@@ -103,12 +103,14 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			return
 		}
 
-		if err := dst.Close(); err != nil {
+		if err = dst.Close(); err != nil {
 			cleanupFailedUpload(root, nil, storedName, logf)
 			http.Error(w, "upload failed", http.StatusInternalServerError)
 			return
 		}
 
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		//nolint:gosec // G705: served as text/plain
 		fmt.Fprintf(w, "stored %s as %s (sha256 %s)\n", part.FileName(), storedName, hashed.Sum())
 	}
 }
@@ -141,9 +143,13 @@ func NewValidatingHandler(root *os.Root, maxUploadSize int64, logf Logf) http.Ha
 // The total size passed to the tracker is unknown (-1): r.ContentLength
 // covers the whole multipart body, not the size of this one file part.
 func NewTrackedPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf) http.HandlerFunc {
-	return newPipelineHandler(root, maxUploadSize, logf, func(ctx context.Context, r io.Reader, storedName string) io.Reader {
+	return newPipelineHandler(root, maxUploadSize, logf, trackProgress(logf))
+}
+
+func trackProgress(logf Logf) wrapReaderFunc {
+	return func(ctx context.Context, r io.Reader, storedName string) io.Reader {
 		return streamio.NewTrackedReader(ctx, r, -1, func(read, total int64) {
 			logf("upload %s: %d/%d octets", storedName, read, total)
 		})
-	})
+	}
 }

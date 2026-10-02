@@ -26,12 +26,12 @@ var tinyPNG = []byte{
 	0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
 }
 
-func multipartRequest(t *testing.T, fieldName, filename string, content []byte) *http.Request {
+func multipartRequest(t *testing.T, filename string, content []byte) *http.Request {
 	t.Helper()
 
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
-	part, err := mw.CreateFormFile(fieldName, filename)
+	part, err := mw.CreateFormFile("file", filename)
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
@@ -48,11 +48,12 @@ func multipartRequest(t *testing.T, fieldName, filename string, content []byte) 
 }
 
 func TestMultipartReaderHandlerRejectsBodyOverLimit(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	handler := upload.NewMultipartReaderHandler(dest, 1<<10) // 1 KiB limit
 
 	payload := bytes.Repeat([]byte("a"), 2<<10) // 2 KiB
-	req := multipartRequest(t, "file", "big.bin", payload)
+	req := multipartRequest(t, "big.bin", payload)
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -63,10 +64,11 @@ func TestMultipartReaderHandlerRejectsBodyOverLimit(t *testing.T) {
 }
 
 func TestMultipartReaderHandlerStoresFileUnderLimit(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	handler := upload.NewMultipartReaderHandler(dest, 1<<20)
 
-	req := multipartRequest(t, "file", "small.bin", []byte("hello world"))
+	req := multipartRequest(t, "small.bin", []byte("hello world"))
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -85,10 +87,11 @@ func TestMultipartReaderHandlerStoresFileUnderLimit(t *testing.T) {
 }
 
 func TestReadAllHandlerStoresFile(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	handler := upload.NewReadAllHandler(dest)
 
-	req := multipartRequest(t, "file", "readall.bin", []byte("payload"))
+	req := multipartRequest(t, "readall.bin", []byte("payload"))
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -102,10 +105,11 @@ func TestReadAllHandlerStoresFile(t *testing.T) {
 }
 
 func TestFormFileHandlerStoresFile(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	handler := upload.NewFormFileHandler(dest, 32<<20)
 
-	req := multipartRequest(t, "file", "formfile.bin", []byte("form payload"))
+	req := multipartRequest(t, "formfile.bin", []byte("form payload"))
 	rec := httptest.NewRecorder()
 
 	handler(rec, req)
@@ -119,6 +123,7 @@ func TestFormFileHandlerStoresFile(t *testing.T) {
 }
 
 func TestFormFileHandlerRejectsMissingField(t *testing.T) {
+	t.Parallel()
 	dest := t.TempDir()
 	handler := upload.NewFormFileHandler(dest, 32<<20)
 
@@ -142,22 +147,31 @@ func TestFormFileHandlerRejectsMissingField(t *testing.T) {
 	}
 }
 
+// newRoot opens a fresh temporary directory as an os.Root closed at the end of the test.
+func newRoot(t *testing.T) (*os.Root, string) {
+	t.Helper()
+
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatalf("open root: %v", err)
+	}
+	t.Cleanup(func() { _ = root.Close() })
+	return root, dir
+}
+
 func sha256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
 }
 
 func TestValidatingHandlerStoresPNGWithGeneratedNameAndIntactBytes(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	handler := upload.NewValidatingHandler(root, int64(len(tinyPNG))+1<<10, t.Logf)
 
-	req := multipartRequest(t, "file", "../../evil.png", tinyPNG)
+	req := multipartRequest(t, "../../evil.png", tinyPNG)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -201,17 +215,13 @@ func TestValidatingHandlerStoresPNGWithGeneratedNameAndIntactBytes(t *testing.T)
 }
 
 func TestValidatingHandlerRejectsTypeOutsideAllowlist(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	handler := upload.NewValidatingHandler(root, 1<<20, t.Logf)
 
 	script := []byte("#!/bin/sh\necho hi\n")
-	req := multipartRequest(t, "file", "payload.sh", script)
+	req := multipartRequest(t, "payload.sh", script)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -229,19 +239,15 @@ func TestValidatingHandlerRejectsTypeOutsideAllowlist(t *testing.T) {
 }
 
 func TestValidatingHandlerRemovesPartialFileOn413(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	// The PNG signature sits in the first 8 bytes so Peek(512) still detects
 	// the type; the limit only bites once io.Copy tries to write the rest.
 	oversized := append(append([]byte{}, tinyPNG[:8]...), bytes.Repeat([]byte{0}, 4096)...)
 	handler := upload.NewValidatingHandler(root, 1024, t.Logf)
 
-	req := multipartRequest(t, "file", "big.png", oversized)
+	req := multipartRequest(t, "big.png", oversized)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -259,18 +265,14 @@ func TestValidatingHandlerRemovesPartialFileOn413(t *testing.T) {
 }
 
 func TestValidatingHandlerDerivesExtensionFromDetectedTypeNotClientFilename(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	handler := upload.NewValidatingHandler(root, int64(len(tinyPNG))+1<<10, t.Logf)
 
 	// The client claims ".html"; the real content, sniffed from the bytes, is
 	// a PNG. The stored extension must follow the sniffed type.
-	req := multipartRequest(t, "file", "evil.html", tinyPNG)
+	req := multipartRequest(t, "evil.html", tinyPNG)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -315,12 +317,8 @@ func multipartRequestWithLeadingField(t *testing.T, fieldName, filename string, 
 }
 
 func TestValidatingHandlerSkipsNonFileFieldsBeforeFilePart(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	handler := upload.NewValidatingHandler(root, int64(len(tinyPNG))+1<<10, t.Logf)
 
@@ -342,16 +340,12 @@ func TestValidatingHandlerSkipsNonFileFieldsBeforeFilePart(t *testing.T) {
 }
 
 func TestTrackedPipelineHandlerStoresFileWithGeneratedName(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, storeDir := newRoot(t)
 
 	handler := upload.NewTrackedPipelineHandler(root, int64(len(tinyPNG))+1<<10, t.Logf)
 
-	req := multipartRequest(t, "file", "photo.png", tinyPNG)
+	req := multipartRequest(t, "photo.png", tinyPNG)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -377,12 +371,8 @@ func TestTrackedPipelineHandlerStoresFileWithGeneratedName(t *testing.T) {
 }
 
 func TestCreateInRootRefusesPathEscape(t *testing.T) {
-	storeDir := t.TempDir()
-	root, err := os.OpenRoot(storeDir)
-	if err != nil {
-		t.Fatalf("open root: %v", err)
-	}
-	defer root.Close()
+	t.Parallel()
+	root, _ := newRoot(t)
 
 	if _, err := upload.CreateInRoot(root, "../../evil.png"); err == nil {
 		t.Fatal("expected CreateInRoot to refuse a path escaping the root, got nil error")

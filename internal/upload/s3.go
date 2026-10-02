@@ -16,7 +16,9 @@ import (
 // NewS3PipelineHandler, narrow enough to substitute with a test double
 // pointed at a fake S3 endpoint.
 type S3Uploader interface {
-	UploadObject(ctx context.Context, in *transfermanager.UploadObjectInput, opts ...func(*transfermanager.Options)) (*transfermanager.UploadObjectOutput, error)
+	UploadObject(
+		ctx context.Context, in *transfermanager.UploadObjectInput, opts ...func(*transfermanager.Options),
+	) (*transfermanager.UploadObjectOutput, error)
 }
 
 // NewS3PipelineHandler builds the article 4 pipeline: the same validation
@@ -76,7 +78,7 @@ func NewS3PipelineHandler(
 			http.Error(w, "cannot read file header", http.StatusBadRequest)
 			return
 		}
-		if err := ValidateType(contentType); err != nil {
+		if err = ValidateType(contentType); err != nil {
 			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
 			return
 		}
@@ -113,6 +115,8 @@ func NewS3PipelineHandler(
 			return
 		}
 
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		//nolint:gosec // G705: served as text/plain
 		fmt.Fprintf(w, "stored %s as s3://%s/%s (sha256 %s)\n", part.FileName(), bucket, key, hashed.Sum())
 	}
 }

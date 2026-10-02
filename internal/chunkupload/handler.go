@@ -14,6 +14,9 @@ import (
 	"sync"
 )
 
+// ErrMissingChunk is returned by Assemble when an index in 0..n-1 was never received.
+var ErrMissingChunk = errors.New("missing chunk")
+
 // maxChunkSize bounds a single request body. It must stay at or above the
 // client's own chunk size (5 MiB, see client.chunkSize) or every upload
 // through this demo handler would fail.
@@ -66,7 +69,7 @@ func (h *Handler) Assemble() ([]byte, error) {
 	for i := 0; i < len(h.chunks); i++ {
 		chunk, ok := h.chunks[i]
 		if !ok {
-			return nil, fmt.Errorf("missing chunk %d", i)
+			return nil, fmt.Errorf("%w %d", ErrMissingChunk, i)
 		}
 		buf.Write(chunk)
 	}

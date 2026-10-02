@@ -10,6 +10,7 @@ import (
 )
 
 func TestHandlerRejectsChunkOverMaxSize(t *testing.T) {
+	t.Parallel()
 	handler := chunkupload.NewHandler()
 
 	oversized := bytes.Repeat([]byte("a"), 5<<20+1)
@@ -26,6 +27,7 @@ func TestHandlerRejectsChunkOverMaxSize(t *testing.T) {
 }
 
 func TestHandlerAcceptsChunkAtMaxSize(t *testing.T) {
+	t.Parallel()
 	handler := chunkupload.NewHandler()
 
 	exact := bytes.Repeat([]byte("a"), 5<<20)
