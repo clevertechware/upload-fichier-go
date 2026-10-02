@@ -9,6 +9,7 @@ import (
 	"time"
 
 	transfermanager "github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
+	"github.com/clevertechware/upload-fichier-go/internal/filecheck"
 	"github.com/clevertechware/upload-fichier-go/streamio"
 )
 
@@ -73,23 +74,23 @@ func NewS3PipelineHandler(
 		defer part.Close()
 
 		br := bufio.NewReader(part)
-		contentType, err := SniffType(br)
+		contentType, err := filecheck.SniffType(br)
 		if err != nil {
 			http.Error(w, "cannot read file header", http.StatusBadRequest)
 			return
 		}
-		if err = ValidateType(contentType); err != nil {
+		if err = filecheck.ValidateType(contentType); err != nil {
 			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
 			return
 		}
 
-		key, err := GenerateStoredName(contentType)
+		key, err := filecheck.GenerateStoredName(contentType)
 		if err != nil {
 			http.Error(w, "cannot generate object key", http.StatusInternalServerError)
 			return
 		}
 
-		hashed := NewHashingReader(br)
+		hashed := filecheck.NewHashingReader(br)
 		tracked := streamio.NewTrackedReader(r.Context(), hashed, -1, func(read, total int64) {
 			if total < 0 {
 				logf("upload s3://%s/%s: %d octets", bucket, key, read)

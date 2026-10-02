@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/clevertechware/upload-fichier-go/internal/filecheck"
 	"github.com/clevertechware/upload-fichier-go/streamio"
 )
 
@@ -63,29 +64,29 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 		defer part.Close()
 
 		br := bufio.NewReader(part)
-		contentType, err := SniffType(br)
+		contentType, err := filecheck.SniffType(br)
 		if err != nil {
 			http.Error(w, "cannot read file header", http.StatusBadRequest)
 			return
 		}
-		if err = ValidateType(contentType); err != nil {
+		if err = filecheck.ValidateType(contentType); err != nil {
 			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
 			return
 		}
 
-		storedName, err := GenerateStoredName(contentType)
+		storedName, err := filecheck.GenerateStoredName(contentType)
 		if err != nil {
 			http.Error(w, "cannot generate name", http.StatusInternalServerError)
 			return
 		}
 
-		dst, err := CreateInRoot(root, storedName)
+		dst, err := filecheck.CreateInRoot(root, storedName)
 		if err != nil {
 			http.Error(w, "cannot store file", http.StatusInternalServerError)
 			return
 		}
 
-		hashed := NewHashingReader(br)
+		hashed := filecheck.NewHashingReader(br)
 		var source io.Reader = hashed
 		if wrap != nil {
 			source = wrap(r.Context(), source, storedName)

@@ -39,8 +39,9 @@ cmd/server/            serveur HTTP d'exemple : une route par exemple, sous /art
 cmd/memprofile/        mesure comparative des approches de réception (articles 1 et 4)
 deploy/                règle de cycle de vie S3 AbortIncompleteMultipartUpload (article 4)
 internal/chunkupload/  handler de démo qui réassemble les morceaux envoyés par client/ (ne pas exposer)
+internal/filecheck/    briques métier sans HTTP : sniffing, liste blanche, hash sha256, nom généré, création confinée dans un os.Root
 internal/genfile/      génère des corps multipart de test en flux, sans les charger en mémoire
-internal/upload/       les handlers de réception, le pipeline (validation, version suivie, S3), sniffing, hash, stockage
+internal/upload/       les handlers HTTP : réception (article 1), pipeline validant et suivi (articles 2-3), S3 (article 4)
 streamio/              TrackedReader : progression throttlée + annulation par contexte (article 3)
 ```
 
@@ -66,11 +67,11 @@ go run ./cmd/server -s3-bucket=mon-bucket   # active la route de l'article 4 (AW
 | Article | Sujet | Fichiers |
 |---|---|---|
 | 1 — Uploader un fichier en Go sans exploser la mémoire | `ReadAll` vs `FormFile` vs `MultipartReader`, `MaxBytesReader` + 413, benchmark mémoire | `internal/upload/handler.go`, `internal/upload/bench_test.go`, `cmd/memprofile/main.go`, `internal/genfile/genfile.go` |
-| 2 — Empiler des io.Reader pour valider un upload | `Peek(512)` + `DetectContentType` + liste blanche, `TeeReader` sha256, nom généré côté serveur à partir du type détecté, `os.Root`, nettoyage du fichier partiel | `internal/upload/sniff.go`, `internal/upload/hash.go`, `internal/upload/store.go`, `internal/upload/pipeline.go` (`NewValidatingHandler`) |
+| 2 — Empiler des io.Reader pour valider un upload | `Peek(512)` + `DetectContentType` + liste blanche, `TeeReader` sha256, nom généré côté serveur à partir du type détecté, `os.Root`, nettoyage du fichier partiel | `internal/filecheck/sniff.go`, `internal/filecheck/hash.go`, `internal/filecheck/store.go`, `internal/upload/pipeline.go` (`NewValidatingHandler`) |
 | 3 — Un io.Reader maison : progression et annulation | `TrackedReader` throttlé à 200 ms, annulation de contexte, branchement serveur, client par morceaux de 5 Mo avec `io.ReadFull` | `streamio/tracked_reader.go`, `internal/upload/pipeline.go` (`NewTrackedPipelineHandler`), `client/upload.go`, `internal/chunkupload/handler.go` |
 | 4 — Streamer un upload Go vers S3 sans toucher le disque | Même validation que l'article 2/3, destination `transfermanager.UploadObject` au lieu d'un fichier confiné, abort multipart sur 413 et sur annulation de contexte, sémaphore de concurrence, mesure du pic de heap contre la borne `Threshold + (Concurrency+1) × PartSize` | `internal/upload/s3.go` (`NewS3PipelineHandler`), `internal/upload/s3_test.go`, `cmd/memprofile/s3discard.go`, `deploy/lifecycle-abort-incomplete-mpu.json` |
 
-`internal/upload/pipeline.go` sépare volontairement les deux premiers articles : `NewValidatingHandler` est le pipeline complet de l'article 2 (aucune trace de `TrackedReader`), et `NewTrackedPipelineHandler` y ajoute la progression de l'article 3 en enveloppant le même reader, sans dupliquer la validation. `cmd/server` fait tourner la version suivie (`NewTrackedPipelineHandler`), qui est un sur-ensemble strict de la version validante. **`pipeline.go` n'a pas été modifié par l'article 4** : `NewS3PipelineHandler` (`internal/upload/s3.go`) réutilise les mêmes fonctions partagées (`nextFilePart`, `SniffType`, `ValidateType`, `GenerateStoredName`, `NewHashingReader`) sans toucher au fichier que les articles 2 et 3 citent.
+`internal/upload/pipeline.go` sépare volontairement les deux premiers articles : `NewValidatingHandler` est le pipeline complet de l'article 2 (aucune trace de `TrackedReader`), et `NewTrackedPipelineHandler` y ajoute la progression de l'article 3 en enveloppant le même reader, sans dupliquer la validation. `cmd/server` fait tourner la version suivie (`NewTrackedPipelineHandler`), qui est un sur-ensemble strict de la version validante. `NewS3PipelineHandler` (`internal/upload/s3.go`) réutilise les mêmes fonctions partagées (`nextFilePart`, `filecheck.SniffType`, `filecheck.ValidateType`, `filecheck.GenerateStoredName`, `filecheck.NewHashingReader`).
 
 ## Dépendances externes (article 4)
 

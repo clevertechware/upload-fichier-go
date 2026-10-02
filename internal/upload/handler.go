@@ -1,6 +1,6 @@
-// Package upload implements the three receiving strategies compared in the
-// first article of the series, plus the content-sniffing, hashing and
-// storage building blocks added by the second.
+// Package upload implements the HTTP handlers of the series: the three
+// receiving strategies of the first article, the validating and tracked
+// pipelines of the second and third, and the S3 pipeline of the fourth.
 package upload
 
 import (

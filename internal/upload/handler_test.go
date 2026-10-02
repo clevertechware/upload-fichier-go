@@ -369,12 +369,3 @@ func TestTrackedPipelineHandlerStoresFileWithGeneratedName(t *testing.T) {
 		t.Fatal("stored bytes differ from source PNG")
 	}
 }
-
-func TestCreateInRootRefusesPathEscape(t *testing.T) {
-	t.Parallel()
-	root, _ := newRoot(t)
-
-	if _, err := upload.CreateInRoot(root, "../../evil.png"); err == nil {
-		t.Fatal("expected CreateInRoot to refuse a path escaping the root, got nil error")
-	}
-}
