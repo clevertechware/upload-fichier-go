@@ -1,7 +1,6 @@
 package upload
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -58,39 +57,15 @@ func NewS3PipelineHandler(
 		}
 		defer func() { <-sem }()
 
-		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-		mr, err := r.MultipartReader()
+		received, err := readValidatedPart(w, r, maxUploadSize)
 		if err != nil {
-			http.Error(w, "invalid multipart body", http.StatusBadRequest)
+			writeError(w, err)
 			return
 		}
+		defer received.part.Close()
+		key, contentType := received.storedName, received.contentType
 
-		part, err := nextFilePart(mr)
-		if err != nil {
-			http.Error(w, "no file part", http.StatusBadRequest)
-			return
-		}
-		defer part.Close()
-
-		br := bufio.NewReader(part)
-		contentType, err := filecheck.SniffType(br)
-		if err != nil {
-			http.Error(w, "cannot read file header", http.StatusBadRequest)
-			return
-		}
-		if err = filecheck.ValidateType(contentType); err != nil {
-			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
-			return
-		}
-
-		key, err := filecheck.GenerateStoredName(contentType)
-		if err != nil {
-			http.Error(w, "cannot generate object key", http.StatusInternalServerError)
-			return
-		}
-
-		hashed := filecheck.NewHashingReader(br)
+		hashed := filecheck.NewHashingReader(received.body)
 		tracked := streamio.NewTrackedReader(r.Context(), hashed, -1, func(read, total int64) {
 			if total < 0 {
 				logf("upload s3://%s/%s: %d octets", bucket, key, read)
@@ -107,18 +82,15 @@ func NewS3PipelineHandler(
 		})
 		if err != nil {
 			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
-				return
+			if !errors.As(err, &maxErr) {
+				logf("upload s3://%s/%s failed: %v", bucket, key, err)
 			}
-			logf("upload s3://%s/%s failed: %v", bucket, key, err)
-			http.Error(w, "upload failed", http.StatusInternalServerError)
+			writeError(w, err)
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		//nolint:gosec // G705: served as text/plain
-		fmt.Fprintf(w, "stored %s as s3://%s/%s (sha256 %s)\n", part.FileName(), bucket, key, hashed.Sum())
+		fmt.Fprintf(w, "stored %s as s3://%s/%s (sha256 %s)\n", received.part.FileName(), bucket, key, hashed.Sum())
 	}
 }
 

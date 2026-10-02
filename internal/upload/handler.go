@@ -5,7 +5,6 @@ package upload
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -56,12 +55,7 @@ func NewMultipartReaderHandler(dest string, maxUploadSize int64) http.HandlerFun
 		defer part.Close()
 
 		if err = storeUnderClientName(dest, part.FileName(), part); err != nil {
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, "upload failed", http.StatusInternalServerError)
+			writeError(w, err)
 		}
 	}
 }

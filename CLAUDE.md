@@ -30,9 +30,10 @@ go run ./cmd/server                              # example server on :8080
   - `pipeline.go`: `NewValidatingHandler` (article 2: sniff, whitelist, sha256, server-generated name, `os.Root`, via `filecheck`) and
     `NewTrackedPipelineHandler` (article 3: the same pipeline plus `streamio.TrackedReader`). The tracked version
     wraps the same reader, so validation is not duplicated.
+  - `receive.go`: the reception both pipelines share (`readValidatedPart`: size limit, first file part, sniff,
+    validate, generated name) and `writeError`, which maps a `statusError` or `http.MaxBytesError` to the response.
   - `s3.go`: `NewS3PipelineHandler` (article 4) streams to S3 through `transfermanager.UploadObject` and a concurrency
-    semaphore (503 + `Retry-After`). It reuses the shared helpers (`nextFilePart`, `filecheck.SniffType`,
-    `filecheck.ValidateType`, `filecheck.GenerateStoredName`, `filecheck.NewHashingReader`).
+    semaphore (503 + `Retry-After`). It reuses `readValidatedPart`, `writeError` and `filecheck.NewHashingReader`.
 - `internal/filecheck/`: the HTTP-free building blocks (`SniffType`, `ValidateType`, `AllowedTypes`,
   `GenerateStoredName`, `CreateInRoot`, `HashingReader`). `upload` depends on it, never the reverse.
 - `cmd/server/`: one route per example under `/articles/<slug>/...`, slug = the article frontmatter slug, files stored
