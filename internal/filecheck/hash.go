@@ -1,4 +1,4 @@
-package upload
+package filecheck
 
 import (
 	"crypto/sha256"

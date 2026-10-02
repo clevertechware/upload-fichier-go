@@ -29,11 +29,11 @@ func s3MultipartBody(fieldName, filename string, size int64) (io.ReadCloser, str
 			pw.CloseWithError(err)
 			return
 		}
-		if _, err := part.Write(pngSignature); err != nil {
+		if _, err = part.Write(pngSignature); err != nil {
 			pw.CloseWithError(err)
 			return
 		}
-		if _, err := io.Copy(part, genfile.NewPatternReader(size-int64(len(pngSignature)))); err != nil {
+		if _, err = io.Copy(part, genfile.NewPatternReader(size-int64(len(pngSignature)))); err != nil {
 			pw.CloseWithError(err)
 			return
 		}

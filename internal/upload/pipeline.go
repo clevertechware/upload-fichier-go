@@ -1,39 +1,21 @@
 package upload
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
-	"mime/multipart"
 	"net/http"
 	"os"
 
+	"github.com/clevertechware/upload-fichier-go/internal/filecheck"
 	"github.com/clevertechware/upload-fichier-go/streamio"
 )
 
 // Logf matches log.Printf's signature, so callers can pass log.Printf
 // directly or a no-op for tests.
 type Logf func(format string, args ...any)
-
-// nextFilePart scans parts until it finds one carrying a filename, skipping
-// plain form fields along the way. Callers get exactly the same guarantee
-// r.FormFile gives them: the returned part is never a text field mistaken
-// for a file because it happened to arrive first.
-func nextFilePart(mr *multipart.Reader) (*multipart.Part, error) {
-	for {
-		part, err := mr.NextPart()
-		if err != nil {
-			return nil, err
-		}
-		if part.FileName() != "" {
-			return part, nil
-		}
-		_ = part.Close()
-	}
-}
 
 // wrapReaderFunc lets newPipelineHandler add behavior around the hashing
 // reader (e.g. progress tracking) right before the final copy, without the
@@ -47,71 +29,39 @@ type wrapReaderFunc func(ctx context.Context, r io.Reader, storedName string) io
 // wrap copies from it unchanged.
 func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrapReaderFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
-
-		mr, err := r.MultipartReader()
+		received, err := readValidatedPart(w, r, maxUploadSize)
 		if err != nil {
-			http.Error(w, "invalid multipart body", http.StatusBadRequest)
+			writeError(w, err)
 			return
 		}
+		defer received.part.Close()
 
-		part, err := nextFilePart(mr)
-		if err != nil {
-			http.Error(w, "no file part", http.StatusBadRequest)
-			return
-		}
-		defer part.Close()
-
-		br := bufio.NewReader(part)
-		contentType, err := SniffType(br)
-		if err != nil {
-			http.Error(w, "cannot read file header", http.StatusBadRequest)
-			return
-		}
-		if err = ValidateType(contentType); err != nil {
-			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
-			return
-		}
-
-		storedName, err := GenerateStoredName(contentType)
-		if err != nil {
-			http.Error(w, "cannot generate name", http.StatusInternalServerError)
-			return
-		}
-
-		dst, err := CreateInRoot(root, storedName)
+		dst, err := filecheck.CreateInRoot(root, received.storedName)
 		if err != nil {
 			http.Error(w, "cannot store file", http.StatusInternalServerError)
 			return
 		}
 
-		hashed := NewHashingReader(br)
+		hashed := filecheck.NewHashingReader(received.body)
 		var source io.Reader = hashed
 		if wrap != nil {
-			source = wrap(r.Context(), source, storedName)
+			source = wrap(r.Context(), source, received.storedName)
 		}
 
 		if _, err = io.Copy(dst, source); err != nil {
-			cleanupFailedUpload(root, dst, storedName, logf)
-
-			var maxErr *http.MaxBytesError
-			if errors.As(err, &maxErr) {
-				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			http.Error(w, "upload failed", http.StatusInternalServerError)
+			cleanupFailedUpload(root, dst, received.storedName, logf)
+			writeError(w, err)
 			return
 		}
 
 		if err = dst.Close(); err != nil {
-			cleanupFailedUpload(root, nil, storedName, logf)
+			cleanupFailedUpload(root, nil, received.storedName, logf)
 			http.Error(w, "upload failed", http.StatusInternalServerError)
 			return
 		}
 
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		//nolint:gosec // G705: served as text/plain
-		fmt.Fprintf(w, "stored %s as %s (sha256 %s)\n", part.FileName(), storedName, hashed.Sum())
+		fmt.Fprintf(w, "stored %s as %s (sha256 %s)\n", received.part.FileName(), received.storedName, hashed.Sum())
 	}
 }
 

@@ -29,9 +29,6 @@ const (
 	formFileMaxMemory  = 32 * mebibyte
 	sizeMargin         = mebibyte
 
-	s3PartSize       = 5 * mebibyte
-	s3Concurrency    = 2
-	s3FailTimeout    = 30 * time.Second
 	s3MaxUploads     = 4
 	s3SlotWait       = time.Minute
 	s3Bucket         = "memprofile-bucket"
@@ -94,12 +91,7 @@ func newApproaches(maxUploadSize int64) []approach {
 			return upload.NewMultipartReaderHandler(dest, maxUploadSize)
 		}},
 		{"Flux vers S3 (transfermanager)", func(string) http.HandlerFunc {
-			uploader := transfermanager.New(discardS3Client{}, func(o *transfermanager.Options) {
-				o.PartSizeBytes = s3PartSize
-				o.MultipartUploadThreshold = s3PartSize
-				o.Concurrency = s3Concurrency
-				o.FailTimeout = s3FailTimeout
-			})
+			uploader := transfermanager.New(discardS3Client{}, upload.ConfigureS3Uploader)
 			return upload.NewS3PipelineHandler(
 				uploader, s3Bucket, maxUploadSize, s3MaxUploads, s3SlotWait, func(string, ...any) {},
 			)

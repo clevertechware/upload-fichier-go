@@ -1,4 +1,6 @@
-package upload
+// Package filecheck holds the HTTP-free building blocks of the upload pipeline: content sniffing against an
+// allow-list, sha256 hashing in passing, server-generated names and root-confined file creation.
+package filecheck
 
 import (
 	"bufio"

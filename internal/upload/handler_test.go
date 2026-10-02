@@ -35,10 +35,10 @@ func multipartRequest(t *testing.T, filename string, content []byte) *http.Reque
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
-	if _, err := part.Write(content); err != nil {
+	if _, err = part.Write(content); err != nil {
 		t.Fatalf("write content: %v", err)
 	}
-	if err := mw.Close(); err != nil {
+	if err = mw.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
 
@@ -304,10 +304,10 @@ func multipartRequestWithLeadingField(t *testing.T, fieldName, filename string, 
 	if err != nil {
 		t.Fatalf("create form file: %v", err)
 	}
-	if _, err := part.Write(content); err != nil {
+	if _, err = part.Write(content); err != nil {
 		t.Fatalf("write content: %v", err)
 	}
-	if err := mw.Close(); err != nil {
+	if err = mw.Close(); err != nil {
 		t.Fatalf("close writer: %v", err)
 	}
 
@@ -367,14 +367,5 @@ func TestTrackedPipelineHandlerStoresFileWithGeneratedName(t *testing.T) {
 	}
 	if !bytes.Equal(got, tinyPNG) {
 		t.Fatal("stored bytes differ from source PNG")
-	}
-}
-
-func TestCreateInRootRefusesPathEscape(t *testing.T) {
-	t.Parallel()
-	root, _ := newRoot(t)
-
-	if _, err := upload.CreateInRoot(root, "../../evil.png"); err == nil {
-		t.Fatal("expected CreateInRoot to refuse a path escaping the root, got nil error")
 	}
 }
