@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,15 +33,15 @@ import (
 // STREAMING-UNSIGNED-PAYLOAD-TRAILER one used to carry that trailer, so
 // leaving checksums on WhenSupported would make every request fail to
 // decode on gofakes3's side.
-func newFakeS3(t *testing.T) (client *s3.Client, bucket string) {
+func newFakeS3(t *testing.T) (*s3.Client, string) {
 	t.Helper()
 
 	faker := gofakes3.New(s3mem.New())
 	server := httptest.NewServer(faker.Server())
 	t.Cleanup(server.Close)
 
-	bucket = "test-bucket"
-	client = s3.New(s3.Options{
+	const bucket = "test-bucket"
+	client := s3.New(s3.Options{
 		Region:                     "us-east-1",
 		Credentials:                credentials.NewStaticCredentialsProvider("KEY", "SECRET", ""),
 		BaseEndpoint:               aws.String(server.URL),
@@ -88,6 +87,7 @@ func noPendingMultipartUploads(t *testing.T, client *s3.Client, bucket string) b
 }
 
 func TestS3PipelineHandlerStoresObjectWithDetectedContentTypeAndHash(t *testing.T) {
+	t.Parallel()
 	client, bucket := newFakeS3(t)
 	uploader := newTestUploader(client)
 	handler := upload.NewS3PipelineHandler(uploader, bucket, int64(len(tinyPNG))+1<<10, 4, time.Second, t.Logf)
@@ -134,6 +134,7 @@ func TestS3PipelineHandlerStoresObjectWithDetectedContentTypeAndHash(t *testing.
 }
 
 func TestS3PipelineHandlerRejectsTypeOutsideAllowlistWithoutCallingS3(t *testing.T) {
+	t.Parallel()
 	client, bucket := newFakeS3(t)
 	uploader := newTestUploader(client)
 	handler := upload.NewS3PipelineHandler(uploader, bucket, 1<<20, 4, time.Second, t.Logf)
@@ -157,6 +158,7 @@ func TestS3PipelineHandlerRejectsTypeOutsideAllowlistWithoutCallingS3(t *testing
 }
 
 func TestS3PipelineHandlerAbortsMultipartUploadOn413(t *testing.T) {
+	t.Parallel()
 	client, bucket := newFakeS3(t)
 	uploader := newTestUploader(client)
 
@@ -207,30 +209,17 @@ func (c *cancelAfterReader) Read(p []byte) (int, error) {
 }
 
 func TestS3PipelineHandlerAbortsMultipartUploadOnContextCancellation(t *testing.T) {
+	t.Parallel()
 	client, bucket := newFakeS3(t)
 	uploader := newTestUploader(client)
 
 	payload := bigPNG(8 << 10)
 
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	part, err := mw.CreateFormFile("file", "big.png")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write(payload); err != nil {
-		t.Fatalf("write content: %v", err)
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatalf("close writer: %v", err)
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	req := httptest.NewRequest(http.MethodPost, "/upload", &cancelAfterReader{r: &buf, remaining: 2048, cancel: cancel})
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req = req.WithContext(ctx)
+	req := multipartRequest(t, "big.png", payload).WithContext(ctx)
+	req.Body = io.NopCloser(&cancelAfterReader{r: req.Body, remaining: 2048, cancel: cancel})
 
 	handler := upload.NewS3PipelineHandler(uploader, bucket, int64(len(payload))+1<<10, 4, time.Second, t.Logf)
 	rec := httptest.NewRecorder()
@@ -258,6 +247,7 @@ func TestS3PipelineHandlerAbortsMultipartUploadOnContextCancellation(t *testing.
 // must be turned away with 503 and a Retry-After once its wait for a slot
 // runs out.
 func TestS3PipelineHandlerLimitsConcurrentUploads(t *testing.T) {
+	t.Parallel()
 	client, bucket := newFakeS3(t)
 	uploader := newTestUploader(client)
 	handler := upload.NewS3PipelineHandler(uploader, bucket, 1<<20, 1, 50*time.Millisecond, t.Logf)
@@ -290,6 +280,7 @@ func TestS3PipelineHandlerLimitsConcurrentUploads(t *testing.T) {
 }
 
 func TestS3PipelineHandlerPanicsWhenNoUploadSlotIsAllowed(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("expected NewS3PipelineHandler to panic when maxConcurrentUploads < 1")
@@ -315,6 +306,7 @@ func (c *contextCapturingUploader) UploadObject(
 }
 
 func TestS3PipelineHandlerPassesRequestContextToUploadObject(t *testing.T) {
+	t.Parallel()
 	uploader := &contextCapturingUploader{}
 	handler := upload.NewS3PipelineHandler(uploader, "bucket", 1<<20, 1, time.Second, t.Logf)
 
@@ -334,7 +326,7 @@ func TestS3PipelineHandlerPassesRequestContextToUploadObject(t *testing.T) {
 	select {
 	case <-uploader.ctx.Done():
 	case <-time.After(time.Second):
-		t.Fatal("cancelling the request context did not cancel the context given to UploadObject")
+		t.Fatal("canceling the request context did not cancel the context given to UploadObject")
 	}
 }
 

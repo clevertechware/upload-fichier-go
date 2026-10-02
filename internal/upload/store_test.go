@@ -8,6 +8,7 @@ import (
 )
 
 func TestGenerateStoredNameUsesExtensionFromContentType(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		contentType string
 		wantExt     string
@@ -19,6 +20,7 @@ func TestGenerateStoredNameUsesExtensionFromContentType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.contentType, func(t *testing.T) {
+			t.Parallel()
 			name, err := upload.GenerateStoredName(tt.contentType)
 			if err != nil {
 				t.Fatalf("GenerateStoredName(%q): %v", tt.contentType, err)
@@ -31,6 +33,7 @@ func TestGenerateStoredNameUsesExtensionFromContentType(t *testing.T) {
 }
 
 func TestGenerateStoredNameRejectsContentTypeOutsideAllowlist(t *testing.T) {
+	t.Parallel()
 	if _, err := upload.GenerateStoredName("application/x-sh"); err == nil {
 		t.Fatal("expected an error for a content type outside AllowedTypes, got nil")
 	}

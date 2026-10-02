@@ -31,7 +31,7 @@ func nextFilePart(mr *multipart.Reader) (*multipart.Part, error) {
 		if part.FileName() != "" {
 			return part, nil
 		}
-		part.Close()
+		_ = part.Close()
 	}
 }
 
@@ -141,9 +141,13 @@ func NewValidatingHandler(root *os.Root, maxUploadSize int64, logf Logf) http.Ha
 // The total size passed to the tracker is unknown (-1): r.ContentLength
 // covers the whole multipart body, not the size of this one file part.
 func NewTrackedPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf) http.HandlerFunc {
-	return newPipelineHandler(root, maxUploadSize, logf, func(ctx context.Context, r io.Reader, storedName string) io.Reader {
+	return newPipelineHandler(root, maxUploadSize, logf, trackProgress(logf))
+}
+
+func trackProgress(logf Logf) wrapReaderFunc {
+	return func(ctx context.Context, r io.Reader, storedName string) io.Reader {
 		return streamio.NewTrackedReader(ctx, r, -1, func(read, total int64) {
 			logf("upload %s: %d/%d octets", storedName, read, total)
 		})
-	})
+	}
 }
