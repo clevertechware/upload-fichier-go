@@ -148,6 +148,8 @@ linters:
       enable-all: false
       disable-all: false
       settings:
+        shadow:
+          strict: true
         printf:
           funcs:
             - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof

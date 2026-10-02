@@ -48,7 +48,7 @@ func MultipartBody(fieldName, filename string, size int64) (io.ReadCloser, strin
 			pw.CloseWithError(err)
 			return
 		}
-		if _, err := io.Copy(part, NewPatternReader(size)); err != nil {
+		if _, err = io.Copy(part, NewPatternReader(size)); err != nil {
 			pw.CloseWithError(err)
 			return
 		}
