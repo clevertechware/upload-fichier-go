@@ -81,7 +81,7 @@ func handleUploadWithLimit(maxUploadSize int64) http.HandlerFunc {
 		}
 		defer dst.Close()
 
-		if _, err := io.Copy(dst, part); err != nil {
+		if _, err = io.Copy(dst, part); err != nil {
 			var maxErr *http.MaxBytesError
 			if errors.As(err, &maxErr) {
 				http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
@@ -94,8 +94,7 @@ func handleUploadWithLimit(maxUploadSize int64) http.HandlerFunc {
 }
 
 // NewMultipartReaderHandler builds the streaming handler used for the memory
-// comparison, storing files under dest and rejecting bodies past
-// maxUploadSize with a 413.
+// comparison, storing files under dest and rejecting bodies past maxUploadSize with a 413.
 func NewMultipartReaderHandler(dest string, maxUploadSize int64) http.HandlerFunc {
 	destDir = dest
 	return handleUploadWithLimit(maxUploadSize)

@@ -68,7 +68,7 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			http.Error(w, "cannot read file header", http.StatusBadRequest)
 			return
 		}
-		if err := ValidateType(contentType); err != nil {
+		if err = ValidateType(contentType); err != nil {
 			http.Error(w, "unsupported file type", http.StatusUnsupportedMediaType)
 			return
 		}
@@ -91,7 +91,7 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			source = wrap(r.Context(), source, storedName)
 		}
 
-		if _, err := io.Copy(dst, source); err != nil {
+		if _, err = io.Copy(dst, source); err != nil {
 			cleanupFailedUpload(root, dst, storedName, logf)
 
 			var maxErr *http.MaxBytesError
@@ -103,7 +103,7 @@ func newPipelineHandler(root *os.Root, maxUploadSize int64, logf Logf, wrap wrap
 			return
 		}
 
-		if err := dst.Close(); err != nil {
+		if err = dst.Close(); err != nil {
 			cleanupFailedUpload(root, nil, storedName, logf)
 			http.Error(w, "upload failed", http.StatusInternalServerError)
 			return
