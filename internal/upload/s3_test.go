@@ -68,27 +68,6 @@ func newTestUploader(client *s3.Client) upload.S3Uploader {
 	})
 }
 
-func multipartS3Request(t *testing.T, fieldName, filename string, content []byte) *http.Request {
-	t.Helper()
-
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	part, err := mw.CreateFormFile(fieldName, filename)
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := part.Write(content); err != nil {
-		t.Fatalf("write content: %v", err)
-	}
-	if err := mw.Close(); err != nil {
-		t.Fatalf("close writer: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/upload", &buf)
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	return req
-}
-
 // bigPNG returns a payload that sniffs as image/png (the PNG signature is
 // its first 8 bytes, which is all http.DetectContentType checks) padded to
 // size bytes so it crosses a small multipart threshold in tests.
@@ -113,7 +92,7 @@ func TestS3PipelineHandlerStoresObjectWithDetectedContentTypeAndHash(t *testing.
 	uploader := newTestUploader(client)
 	handler := upload.NewS3PipelineHandler(uploader, bucket, int64(len(tinyPNG))+1<<10, 4, time.Second, t.Logf)
 
-	req := multipartS3Request(t, "file", "photo.png", tinyPNG)
+	req := multipartRequest(t, "photo.png", tinyPNG)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -160,7 +139,7 @@ func TestS3PipelineHandlerRejectsTypeOutsideAllowlistWithoutCallingS3(t *testing
 	handler := upload.NewS3PipelineHandler(uploader, bucket, 1<<20, 4, time.Second, t.Logf)
 
 	script := []byte("#!/bin/sh\necho hi\n")
-	req := multipartS3Request(t, "file", "payload.sh", script)
+	req := multipartRequest(t, "payload.sh", script)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -187,7 +166,7 @@ func TestS3PipelineHandlerAbortsMultipartUploadOn413(t *testing.T) {
 	payload := bigPNG(8 << 10)
 	handler := upload.NewS3PipelineHandler(uploader, bucket, 2<<10, 4, time.Second, t.Logf)
 
-	req := multipartS3Request(t, "file", "big.png", payload)
+	req := multipartRequest(t, "big.png", payload)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -295,7 +274,7 @@ func TestS3PipelineHandlerLimitsConcurrentUploads(t *testing.T) {
 	}()
 	<-blocking.started // request A now holds the only slot
 
-	reqB := multipartS3Request(t, "file", "photo.png", tinyPNG)
+	reqB := multipartRequest(t, "photo.png", tinyPNG)
 	recB := httptest.NewRecorder()
 	handler(recB, reqB)
 
@@ -340,7 +319,7 @@ func TestS3PipelineHandlerPassesRequestContextToUploadObject(t *testing.T) {
 	handler := upload.NewS3PipelineHandler(uploader, "bucket", 1<<20, 1, time.Second, t.Logf)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := multipartS3Request(t, "file", "photo.png", tinyPNG).WithContext(ctx)
+	req := multipartRequest(t, "photo.png", tinyPNG).WithContext(ctx)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -403,7 +382,7 @@ func TestS3PipelineHandlerCreatesNoMultipartTempFiles(t *testing.T) {
 	// 8 KiB comfortably crosses the 1 KiB test multipart threshold, so the
 	// streamed part is read in several chunks rather than a single buffer.
 	payload := bigPNG(8 << 10)
-	req := multipartS3Request(t, "file", "big.png", payload)
+	req := multipartRequest(t, "big.png", payload)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
@@ -427,7 +406,7 @@ func TestFormFileHandlerCreatesMultipartTempFilesOverMaxMemory(t *testing.T) {
 	handler := upload.NewFormFileHandler(dest, 16) // maxMemory far below the payload below
 
 	payload := bytes.Repeat([]byte("a"), 4096)
-	req := multipartRequest(t, "file", "witness.bin", payload)
+	req := multipartRequest(t, "witness.bin", payload)
 	rec := httptest.NewRecorder()
 	handler(rec, req)
 
